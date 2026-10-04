@@ -116,7 +116,7 @@
 // ---- tunables (these are the dials to turn during the gate) ----
 const RMS_GATE   = 0.010;  // below this = silence
 const CONF_GATE  = 0.90;   // autocorrelation peak / zero-lag
-const HYST_MS    = 80;     // hold a new band this long before committing
+const HYST_MS    = 120;    // hold a new band this long before committing; trial for casual-play flicker
 const BAND_SEMI  = 2;      // smaller pitch changes for comfortable casual play
 const MIN_HZ     = 70, MAX_HZ = 1100;
 const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. Halve it (and raise MIN_HZ to ~100) if gate 1 fails
