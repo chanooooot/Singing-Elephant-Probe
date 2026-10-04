@@ -94,7 +94,7 @@
 <div class="panel">
   <div class="label">Gate results</div>
   <table>
-    <tr><td>1 · Onset readout &le; 120 ms (provisional)</td><td id="g1" class="wait">—</td></tr>
+    <tr><td>1 · Onset readout &le; 170 ms (&asymp; 200 ms real)</td><td id="g1" class="wait">—</td></tr>
     <tr><td>2 · Sustain stability &ge; 95%</td><td id="g2" class="wait">—</td></tr>
     <tr><td>3 · Silence: 0 band changes / voiced frames</td><td id="g3" class="wait">—</td></tr>
     <tr><td>4 · Range coverage (per voice)</td><td id="g4" class="wait">—</td></tr>
@@ -115,13 +115,15 @@
 <script>
 // ---- tunables (these are the dials to turn during the gate) ----
 const RMS_GATE   = 0.010;  // below this = silence
-const CONF_GATE  = 0.90;   // autocorrelation peak / zero-lag
-const HYST_MS    = 120;    // hold a new band this long before committing; trial for casual-play flicker
+const CONF_GATE  = 0.80;   // autocorrelation peak / zero-lag; 0.90 dropped held notes at arm's length
+const HYST_MS    = 80;     // hold a new band this long before committing
 const BAND_SEMI  = 2;      // smaller pitch changes for comfortable casual play
+const EDGE_SEMI  = 0.5;    // leaving LOW/HIGH needs this much past the edge back toward mid
 const MIN_HZ     = 70, MAX_HZ = 1100;
 const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. Halve it (and raise MIN_HZ to ~100) if gate 1 fails
 const VIEW_LO    = 70, VIEW_HI = 1100; // needle scale range (log)
 const SUSTAIN_MIN_FRAMES = 60; // at least 20 fps over the 3s test, like the silence gate
+const GATE1_MS   = 170;    // readout limit: ~200 ms real minus window fill + mic
 
 let ac, analyser, buf, running = false;
 let mid = null;                       // calibrated mid, Hz
@@ -174,18 +176,19 @@ const semisFromMid = hz => 12 * Math.log2(hz / mid);
 function bandOf(hz, conf){
   if (!hz || conf < CONF_GATE || mid === null) return 'NONE';
   const s = semisFromMid(hz);
-  if (s < -BAND_SEMI) return 'LOW';
-  if (s >  BAND_SEMI) return 'HIGH';
+  const edge = band => committed === band ? BAND_SEMI - EDGE_SEMI : BAND_SEMI;  // pitch hysteresis
+  if (s < -edge('LOW')) return 'LOW';
+  if (s >  edge('HIGH')) return 'HIGH';
   return 'MID';
 }
 
 // ---------- mic ----------
 $('btnStart').onclick = async () => {
   try {
+    ac = new (window.AudioContext||window.webkitAudioContext)();   // before any await: iOS needs the tap
     const stream = await navigator.mediaDevices.getUserMedia({audio:{
       echoCancellation:false, noiseSuppression:false, autoGainControl:false
     }});
-    ac = new (window.AudioContext||window.webkitAudioContext)();
     await ac.resume();
     analyser = ac.createAnalyser();
     analyser.fftSize = FFT_SIZE;
@@ -198,7 +201,7 @@ $('btnStart').onclick = async () => {
     log('mic open @ ' + ac.sampleRate + ' Hz. AEC/NS/AGC off. window ' + Math.round(1000*FFT_SIZE/ac.sampleRate) + ' ms (not included in the latency readout).');
     loop();
   } catch (e) {
-    log('MIC FAILED: ' + e.name + ' — needs https and a user tap.');
+    log('MIC FAILED: ' + e.name + ' — needs https and a user tap.\nไมค์ใช้ไม่ได้ ถ้าเปิดจาก LINE/Messenger ให้เปิดลิงก์นี้ใน Safari หรือ Chrome');
   }
 };
 
@@ -352,13 +355,14 @@ function loop(){
 }
 
 function onCommit(from, to, now, raw){
+  log(from + ' -> ' + to + ' (raw ' + raw + ')');   // raw NONE = dropout to walk, else pitch moved
   // gate 1: measured only on a genuine onset out of silence
   if (from === 'MID' && onsetAt !== null && raw !== 'NONE'){
     const ms = Math.round(now - onsetAt);
     $('lat').textContent = ms;
     lats.push(ms);
     const med = lats.slice().sort((a,b)=>a-b)[Math.floor(lats.length/2)];
-    setGate('g1', med <= 120, 'median ' + med + ' ms · n=' + lats.length);
+    setGate('g1', med <= GATE1_MS, 'median ' + med + ' ms · n=' + lats.length);
     log('onset -> ' + to + ' in ' + ms + ' ms');
     onsetAt = null;                              // one reading per onset
   }
