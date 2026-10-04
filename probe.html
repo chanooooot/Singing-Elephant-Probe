@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pitch Probe — chang-chang-chang Phase 0</title>
+<style>
+  :root{
+    --ink:#e8e4dc;
+    --dim:#6f6a60;
+    --bg:#14130f;
+    --panel:#1d1b16;
+    --line:#2e2b24;
+    --low:#4a90d9;
+    --mid:#7dbf5a;
+    --high:#e0a53a;
+    --bad:#c4553f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:14px/1.4 ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    padding:16px; padding-bottom:48px;
+    -webkit-text-size-adjust:100%;
+  }
+  h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:500;margin-bottom:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);padding:12px;margin-bottom:10px}
+  .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+  .big{font-size:44px;line-height:1;font-variant-numeric:tabular-nums}
+  .band{font-size:34px;line-height:1;letter-spacing:.04em;text-transform:uppercase}
+  .band.LOW{color:var(--low)} .band.MID{color:var(--mid)} .band.HIGH{color:var(--high)} .band.NONE{color:var(--dim)}
+  .row{display:flex;gap:10px}
+  .row>.panel{flex:1}
+  .bar{height:6px;background:#0c0b08;border:1px solid var(--line);position:relative;margin-top:6px}
+  .bar>i{position:absolute;left:0;top:0;bottom:0;background:var(--mid);display:block}
+  #scale{position:relative;height:64px;background:#0c0b08;border:1px solid var(--line);margin-top:8px;overflow:hidden}
+  #scale .zone{position:absolute;top:0;bottom:0;opacity:.16}
+  #scale .edge{position:absolute;top:0;bottom:0;width:1px;background:var(--dim)}
+  #needle{position:absolute;top:0;bottom:0;width:2px;background:var(--ink);transition:left .04s linear}
+  button{
+    font:inherit;background:transparent;color:var(--ink);border:1px solid var(--ink);
+    padding:11px 14px;width:100%;margin-top:8px;letter-spacing:.08em;text-transform:uppercase;font-size:12px;
+  }
+  button:active{background:var(--ink);color:var(--bg)}
+  button:disabled{opacity:.35}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .pass{color:var(--mid)} .fail{color:var(--bad)} .wait{color:var(--dim)}
+  #log{max-height:150px;overflow-y:auto;font-size:11px;color:var(--dim);white-space:pre-wrap}
+  .hint{font-size:11px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+
+<h1>Pitch Probe · Phase 0 Gate</h1>
+
+<div class="panel">
+  <div class="label">Detected pitch</div>
+  <div class="big"><span id="hz">—</span><span style="font-size:16px;color:var(--dim)"> Hz</span></div>
+  <div id="scale">
+    <div class="zone" id="zLow" style="background:var(--low)"></div>
+    <div class="zone" id="zMid" style="background:var(--mid)"></div>
+    <div class="zone" id="zHigh" style="background:var(--high)"></div>
+    <div class="edge" id="eLow"></div>
+    <div class="edge" id="eHigh"></div>
+    <div id="needle" style="left:-4px"></div>
+  </div>
+  <div class="hint">Needle = raw pitch. Coloured zones = your bands after calibration.</div>
+</div>
+
+<div class="row">
+  <div class="panel">
+    <div class="label">Committed band</div>
+    <div class="band NONE" id="band">—</div>
+  </div>
+  <div class="panel">
+    <div class="label">Onset readout (excludes mic/window delay)</div>
+    <div class="big" style="font-size:30px"><span id="lat">—</span><span style="font-size:14px;color:var(--dim)"> ms</span></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="label">Signal</div>
+  <table>
+    <tr><td>RMS level</td><td id="rms">—</td></tr>
+    <tr><td>Confidence</td><td id="conf">—</td></tr>
+    <tr><td>Calibrated mid</td><td id="calib">not set</td></tr>
+    <tr><td>Frame rate</td><td id="fps">—</td></tr>
+  </table>
+  <div class="bar"><i id="rmsBar" style="width:0"></i></div>
+</div>
+
+<div class="panel">
+  <div class="label">Gate results</div>
+  <table>
+    <tr><td>1 · Onset readout &le; 120 ms (provisional)</td><td id="g1" class="wait">—</td></tr>
+    <tr><td>2 · Sustain stability &ge; 95%</td><td id="g2" class="wait">—</td></tr>
+    <tr><td>3 · Silence: 0 band changes / voiced frames</td><td id="g3" class="wait">—</td></tr>
+    <tr><td>4 · Range coverage (per voice)</td><td id="g4" class="wait">—</td></tr>
+  </table>
+</div>
+
+<button id="btnStart">Start mic</button>
+<button id="btnCal" disabled>Calibrate — sing ช้าง~ ช้าง~ ช้าง~ (2s)</button>
+<button id="btnSustain" disabled>Test 2 · sustain 3s</button>
+<button id="btnSilence" disabled>Test 3 · silence 30s</button>
+<button id="btnReset" disabled>Reset all tests</button>
+
+<div class="panel" style="margin-top:10px">
+  <div class="label">Log</div>
+  <div id="log">idle.</div>
+</div>
+
+<script>
+// ---- tunables (these are the dials to turn during the gate) ----
+const RMS_GATE   = 0.010;  // below this = silence
+const CONF_GATE  = 0.90;   // autocorrelation peak / zero-lag
+const HYST_MS    = 80;     // hold a new band this long before committing
+const BAND_SEMI  = 3;      // band edges at mid +/- this many semitones
+const MIN_HZ     = 70, MAX_HZ = 1100;
+const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. Halve it (and raise MIN_HZ to ~100) if gate 1 fails
+const VIEW_LO    = 70, VIEW_HI = 1100; // needle scale range (log)
+const SUSTAIN_MIN_FRAMES = 60; // at least 20 fps over the 3s test, like the silence gate
+
+let ac, analyser, buf, running = false;
+let mid = null;                       // calibrated mid, Hz
+let committed = 'NONE', pending = null, pendingSince = 0;
+let onsetArmed = true, onsetAt = null, silenceSince = null;
+let frames = 0, fpsAt = 0;
+let lats = [];                        // gate 1 onset readings, ms
+
+const $ = id => document.getElementById(id);
+const log = m => { const l=$('log'); l.textContent = m + '\n' + l.textContent; };
+
+// ---------- pitch detection: normalised autocorrelation ----------
+function detect(b, sr){
+  const N = b.length;
+  let rms = 0;
+  for (let i=0;i<N;i++) rms += b[i]*b[i];
+  rms = Math.sqrt(rms/N);
+  if (rms < RMS_GATE) return {hz:0, conf:0, rms};
+
+  const minLag = Math.floor(sr/MAX_HZ), maxLag = Math.min(Math.floor(sr/MIN_HZ), N-1);
+  let c0 = 0;
+  for (let i=0;i<N;i++) c0 += b[i]*b[i];
+
+  const ss = new Float32Array(maxLag+2);
+  let best = -1, bestLag = -1, prev = Infinity, rising = false;
+  for (let lag=minLag; lag<=maxLag; lag++){
+    let s = 0;
+    for (let i=0;i<N-lag;i++) s += b[i]*b[i+lag];
+    s = s / (c0 * (1 - lag/N) || 1);          // length-normalised
+    if (s > prev) rising = true;               // skip the zero-lag shoulder
+    if (rising && s > best){ best = s; bestLag = lag; }
+    ss[lag] = s; prev = s;
+  }
+  if (bestLag < 0) return {hz:0, conf:0, rms};
+  // take the first peak near the max: 2x/3x period score almost as high (octave-down errors)
+  for (let l=minLag+1; l<bestLag; l++)
+    if (ss[l] >= 0.9*best && ss[l] >= ss[l-1] && ss[l] >= ss[l+1]){ bestLag = l; break; }
+
+  // parabolic interpolation on the raw correlation for sub-sample accuracy
+  const acf = l => { let s=0; for (let i=0;i<N-l;i++) s+=b[i]*b[i+l]; return s/(1-l/N); };
+  const x1=acf(bestLag-1), x2=acf(bestLag), x3=acf(bestLag+1);
+  const a=(x1+x3-2*x2)/2, d=(x3-x1)/2;
+  const lag = a ? bestLag - d/(2*a) : bestLag;
+
+  return {hz: sr/lag, conf: Math.max(0, Math.min(1, best)), rms};
+}
+
+const semisFromMid = hz => 12 * Math.log2(hz / mid);
+
+function bandOf(hz, conf){
+  if (!hz || conf < CONF_GATE || mid === null) return 'NONE';
+  const s = semisFromMid(hz);
+  if (s < -BAND_SEMI) return 'LOW';
+  if (s >  BAND_SEMI) return 'HIGH';
+  return 'MID';
+}
+
+// ---------- mic ----------
+$('btnStart').onclick = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false
+    }});
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    await ac.resume();
+    analyser = ac.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    ac.createMediaStreamSource(stream).connect(analyser);
+    buf = new Float32Array(analyser.fftSize);
+    running = true;
+    navigator.wakeLock?.request('screen').catch(()=>{});   // iOS auto-lock can end the 30s silence test
+    ['btnCal','btnSustain','btnSilence','btnReset'].forEach(i=>$(i).disabled=false);
+    $('btnStart').disabled = true;
+    log('mic open @ ' + ac.sampleRate + ' Hz. AEC/NS/AGC off. window ' + Math.round(1000*FFT_SIZE/ac.sampleRate) + ' ms (not included in the latency readout).');
+    loop();
+  } catch (e) {
+    log('MIC FAILED: ' + e.name + ' — needs https and a user tap.');
+  }
+};
+
+// ---------- calibration (this is the game's start gate) ----------
+let calSamples = null;
+$('btnCal').onclick = () => {
+  mid = null;
+  resetTests();
+  $('calib').textContent = 'not set';
+  ['zLow','zMid','zHigh','eLow','eHigh'].forEach(id => $(id).style.visibility='hidden');
+  $('btnCal').disabled = true;
+  calSamples = [];
+  log('calibrating — sing ช้าง~ ช้าง~ ช้าง~ now (2s)…');
+  setTimeout(finishCal, 2000);
+};
+function finishCal(){
+  const v = calSamples.filter(x=>x>0);
+  calSamples = null;
+  $('btnCal').disabled = false;
+  if (v.length < 12){ log('CAL FAILED — not enough voiced frames. Sing louder / longer.'); return; }
+  v.sort((a,b)=>a-b);
+  mid = v[Math.floor(v.length/2)];
+  $('calib').textContent = mid.toFixed(1) + ' Hz  (' + (mid/Math.pow(2,BAND_SEMI/12)).toFixed(0)
+    + '–' + (mid*Math.pow(2,BAND_SEMI/12)).toFixed(0) + ' = MID)';
+  drawZones();
+  resetTests();                                  // every gate belongs to this calibration
+  log('calibrated. mid=' + mid.toFixed(1) + ' Hz from ' + v.length + ' frames.');
+}
+
+// ---------- tests ----------
+let sustain = null, silence = null, coverage = {LOW:false, MID:false, HIGH:false};
+let sustainTimer, silenceTimer;
+
+$('btnSustain').onclick = () => {
+  if (mid === null){ log('calibrate first.'); return; }
+  $('btnSustain').disabled = true;
+  sustain = {hits:0, total:0, target:null, wrong:0, commits:0};
+  log('sustain test — hold ONE steady note for 3s…');
+  sustainTimer = setTimeout(() => {
+    const t = sustain; sustain = null;
+    $('btnSustain').disabled = false;
+    if (!t) return;                               // reset mid-test
+    if (t.total < SUSTAIN_MIN_FRAMES){ setGate('g2', false, t.total + ' frames — screen slept?'); log('SUSTAIN: too few frames; keep the screen on and retry.'); return; }
+    const pct = 100 * t.hits / t.total;
+    const ok = pct >= 95 && t.commits === 0;   // flicker = a committed band change
+    setGate('g2', ok, pct.toFixed(1) + '% · ' + t.wrong + ' flick · ' + t.commits + ' commit');
+    log('SUSTAIN: ' + pct.toFixed(1) + '% in band "' + t.target + '", ' + t.wrong + ' wrong-band frames, ' + t.commits + ' band commit(s).');
+  }, 3000);
+};
+
+$('btnSilence').onclick = () => {
+  if (mid === null){ log('calibrate first.'); return; }
+  if (committed !== 'MID' || silenceSince === null || performance.now() - silenceSince < HYST_MS){
+    log('stop singing; wait for MID and stable silence, then retry Test 3.'); return;
+  }
+  $('btnSilence').disabled = true;
+  silence = {changes:0, frames:0, voiced:0};
+  log('silence test — say nothing for 30s. Leave the fan ON.');
+  silenceTimer = setTimeout(() => {
+    const s = silence; silence = null;
+    $('btnSilence').disabled = false;
+    if (!s) return;                               // reset mid-test
+    if (s.frames < 600){ setGate('g3', false, s.frames + ' frames — screen slept?'); log('SILENCE: only ' + s.frames + ' frames ran; keep the screen on and retry.'); return; }
+    setGate('g3', s.changes === 0 && s.voiced === 0, s.changes + ' change(s) · ' + s.voiced + ' voiced frame(s)');
+    log('SILENCE: ' + s.changes + ' spurious band change(s), ' + s.voiced + ' accepted voiced frame(s).');
+  }, 30000);
+};
+
+$('btnReset').onclick = () => {
+  resetTests();
+  log('tests reset. (mid stays calibrated — recalibrate for a new voice)');
+};
+
+function resetTests(){
+  clearTimeout(sustainTimer);
+  clearTimeout(silenceTimer);
+  ['btnSustain','btnSilence'].forEach(id => $(id).disabled=false);
+  ['g1','g2','g3','g4'].forEach(id => { $(id).textContent='—'; $(id).className='wait'; });
+  coverage = {LOW:false, MID:false, HIGH:false};
+  lats = [];
+  sustain = silence = null;
+  onsetAt = silenceSince = null;
+  onsetArmed = false;                            // require stable silence before the next onset
+  $('lat').textContent = '—';
+}
+
+function setGate(id, ok, txt){
+  const el = $(id);
+  el.textContent = txt;
+  el.className = ok ? 'pass' : 'fail';
+}
+
+// ---------- main loop ----------
+function loop(){
+  if (!running) return;
+  requestAnimationFrame(loop);
+
+  analyser.getFloatTimeDomainData(buf);
+  const {hz, conf, rms} = detect(buf, ac.sampleRate);
+  const voiced = hz > 0 && conf >= CONF_GATE;
+
+  // readouts
+  $('hz').textContent = hz ? hz.toFixed(1) : '—';
+  $('rms').textContent = rms.toFixed(4);
+  $('conf').textContent = conf.toFixed(3);
+  $('rmsBar').style.width = Math.min(100, rms*900) + '%';
+  $('rmsBar').style.background = rms < RMS_GATE ? 'var(--dim)' : 'var(--mid)';
+  $('needle').style.left = hz
+    ? (100 * (Math.log2(hz/VIEW_LO) / Math.log2(VIEW_HI/VIEW_LO))) + '%'
+    : '-4px';
+
+  frames++;
+  const now = performance.now();
+  if (now - fpsAt > 500){ $('fps').textContent = Math.round(frames*1000/(now-fpsAt)) + ' fps'; frames=0; fpsAt=now; }
+
+  if (calSamples && voiced) calSamples.push(hz);
+  if (silence){ silence.frames++; if (voiced) silence.voiced++; }
+
+  // GATE 1 — onset latency: silence -> first committed band
+  if (voiced){
+    if (onsetArmed){ onsetAt = now; onsetArmed = false; }
+    silenceSince = null;
+  } else {
+    if (silenceSince === null) silenceSince = now;
+    if (now - silenceSince >= HYST_MS){ onsetAt = null; onsetArmed = true; }
+  }
+
+  // hysteresis commit
+  const raw = bandOf(hz, conf);
+  const candidate = raw === 'NONE' ? 'MID' : raw;   // silence defaults to walk
+  if (candidate !== committed){
+    if (pending !== candidate){ pending = candidate; pendingSince = now; }
+    else if (now - pendingSince >= HYST_MS){
+      const was = committed;
+      committed = candidate;
+      pending = null;
+      onCommit(was, committed, now, raw);
+    }
+  } else pending = null;
+
+  $('band').textContent = committed;
+  $('band').className = 'band ' + committed;
+
+  // GATE 2 — sustain stability
+  if (sustain){
+    // seed from the committed band, not the first (least settled) voiced frame
+    if (!sustain.target && voiced && raw === committed) sustain.target = committed;
+    sustain.total++;
+    if (voiced && raw === sustain.target) sustain.hits++; else sustain.wrong++;
+  }
+}
+
+function onCommit(from, to, now, raw){
+  // gate 1: measured only on a genuine onset out of silence
+  if (from === 'MID' && onsetAt !== null && raw !== 'NONE'){
+    const ms = Math.round(now - onsetAt);
+    $('lat').textContent = ms;
+    lats.push(ms);
+    const med = lats.slice().sort((a,b)=>a-b)[Math.floor(lats.length/2)];
+    setGate('g1', med <= 120, 'median ' + med + ' ms · n=' + lats.length);
+    log('onset -> ' + to + ' in ' + ms + ' ms');
+    onsetAt = null;                              // one reading per onset
+  }
+  // gate 2: any commit after the target is seeded is a flicker
+  if (sustain && sustain.target) sustain.commits++;
+  // gate 3: any commit during the silence window is a failure
+  if (silence) silence.changes++;
+  // gate 4: coverage
+  if (raw !== 'NONE'){
+    coverage[raw] = true;
+    const got = Object.keys(coverage).filter(k=>coverage[k]);
+    setGate('g4', got.length === 3, got.join('/') || '—');
+  }
+}
+
+function drawZones(){
+  ['zLow','zMid','zHigh','eLow','eHigh'].forEach(id => $(id).style.visibility='');
+  const pos = hz => 100 * (Math.log2(hz/VIEW_LO) / Math.log2(VIEW_HI/VIEW_LO));
+  const lo = mid / Math.pow(2, BAND_SEMI/12), hi = mid * Math.pow(2, BAND_SEMI/12);
+  const pLo = pos(lo), pHi = pos(hi);
+  $('zLow').style.left = '0%';   $('zLow').style.width  = pLo + '%';
+  $('zMid').style.left = pLo+'%';$('zMid').style.width  = (pHi-pLo) + '%';
+  $('zHigh').style.left= pHi+'%';$('zHigh').style.width = (100-pHi) + '%';
+  $('eLow').style.left = pLo + '%';
+  $('eHigh').style.left = pHi + '%';
+}
+</script>
+</body>
+</html>
