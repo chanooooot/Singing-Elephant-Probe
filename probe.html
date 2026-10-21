@@ -94,8 +94,8 @@
 <div class="panel">
   <div class="label">Gate results</div>
   <table>
-    <tr><td>1 · Onset readout &le; 170 ms (&asymp; 200 ms real)</td><td id="g1" class="wait">—</td></tr>
-    <tr><td>2 · Hold high or low 3s: pose never changes</td><td id="g2" class="wait">—</td></tr>
+    <tr><td>1 · Onset readout &le; 170 ms (info, excludes mic delay)</td><td id="g1" class="wait">—</td></tr>
+    <tr><td>2 · Hold high or low 3s: pose never changes (info)</td><td id="g2" class="wait">—</td></tr>
     <tr><td>3 · Silence: 0 band changes / voiced frames</td><td id="g3" class="wait">—</td></tr>
     <tr><td>4 · Range coverage (per voice)</td><td id="g4" class="wait">—</td></tr>
   </table>
@@ -121,7 +121,7 @@ const RELEASE_MS = 200;    // leaving LOW/HIGH for MID waits this long: short vo
 const BAND_SEMI  = 2;      // smaller pitch changes for comfortable casual play
 const EDGE_SEMI  = 0.5;    // leaving LOW/HIGH needs this much past the edge back toward mid
 const MIN_HZ     = 70, MAX_HZ = 1100;
-const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. Halve it (and raise MIN_HZ to ~100) if gate 1 fails
+const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. 1024 needs MIN_HZ ~100, which drops voices below 100 Hz (SPEC §8)
 const VIEW_LO    = 70, VIEW_HI = 1100; // needle scale range (log)
 const SUSTAIN_MIN_FRAMES = 60; // at least 20 fps over the 3s test, like the silence gate
 const SUSTAIN_HOLD_MS = 2000;  // gate 2: the HIGH/LOW pose must be held this long of the 3s window
