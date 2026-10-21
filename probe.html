@@ -95,7 +95,7 @@
   <div class="label">Gate results</div>
   <table>
     <tr><td>1 · Onset readout &le; 170 ms (&asymp; 200 ms real)</td><td id="g1" class="wait">—</td></tr>
-    <tr><td>2 · Sustain stability &ge; 95%</td><td id="g2" class="wait">—</td></tr>
+    <tr><td>2 · Hold high or low 3s: pose never changes</td><td id="g2" class="wait">—</td></tr>
     <tr><td>3 · Silence: 0 band changes / voiced frames</td><td id="g3" class="wait">—</td></tr>
     <tr><td>4 · Range coverage (per voice)</td><td id="g4" class="wait">—</td></tr>
   </table>
@@ -103,7 +103,7 @@
 
 <button id="btnStart">Start mic</button>
 <button id="btnCal" disabled>Calibrate — sing ช้าง~ ช้าง~ ช้าง~ (2s)</button>
-<button id="btnSustain" disabled>Test 2 · sustain 3s</button>
+<button id="btnSustain" disabled>Test 2 · hold high or low 3s</button>
 <button id="btnSilence" disabled>Test 3 · silence 30s</button>
 <button id="btnReset" disabled>Reset all tests</button>
 
@@ -117,6 +117,7 @@
 const RMS_GATE   = 0.010;  // below this = silence
 const CONF_GATE  = 0.80;   // autocorrelation peak / zero-lag; 0.90 dropped held notes at arm's length
 const HYST_MS    = 80;     // hold a new band this long before committing
+const RELEASE_MS = 200;    // leaving LOW/HIGH for MID waits this long: short voice breaks keep the pose
 const BAND_SEMI  = 2;      // smaller pitch changes for comfortable casual play
 const EDGE_SEMI  = 0.5;    // leaving LOW/HIGH needs this much past the edge back toward mid
 const MIN_HZ     = 70, MAX_HZ = 1100;
@@ -239,16 +240,17 @@ $('btnSustain').onclick = () => {
   if (mid === null){ log('calibrate first.'); return; }
   $('btnSustain').disabled = true;
   sustain = {hits:0, total:0, target:null, wrong:0, commits:0};
-  log('sustain test — hold ONE steady note for 3s…');
+  log('sustain test — hold a HIGH or LOW note for 3s…');
   sustainTimer = setTimeout(() => {
     const t = sustain; sustain = null;
     $('btnSustain').disabled = false;
     if (!t) return;                               // reset mid-test
     if (t.total < SUSTAIN_MIN_FRAMES){ setGate('g2', false, t.total + ' frames — screen slept?'); log('SUSTAIN: too few frames; keep the screen on and retry.'); return; }
-    const pct = 100 * t.hits / t.total;
-    const ok = pct >= 95 && t.commits === 0;   // flicker = a committed band change
-    setGate('g2', ok, pct.toFixed(1) + '% · ' + t.wrong + ' flick · ' + t.commits + ' commit');
-    log('SUSTAIN: ' + pct.toFixed(1) + '% in band "' + t.target + '", ' + t.wrong + ' wrong-band frames, ' + t.commits + ' band commit(s).');
+    if (!t.target){ setGate('g2', false, 'no high/low pose'); log('SUSTAIN: never reached HIGH or LOW; hold a high or low note.'); return; }
+    const pct = 100 * t.hits / t.total;           // reported only: the player sees the pose, not raw frames
+    const ok = t.commits === 0;                   // flicker = a committed band change
+    setGate('g2', ok, t.target + ' · ' + pct.toFixed(1) + '% · ' + t.commits + ' commit');
+    log('SUSTAIN: held ' + t.target + ', ' + pct.toFixed(1) + '% raw frames in band, ' + t.wrong + ' off-band frames, ' + t.commits + ' pose change(s).');
   }, 3000);
 };
 
@@ -326,7 +328,7 @@ function loop(){
     silenceSince = null;
   } else {
     if (silenceSince === null) silenceSince = now;
-    if (now - silenceSince >= HYST_MS){ onsetAt = null; onsetArmed = true; }
+    if (now - silenceSince >= HYST_MS && committed === 'MID'){ onsetAt = null; onsetArmed = true; }  // a break inside a held pose is not an onset
   }
 
   // hysteresis commit
@@ -334,7 +336,7 @@ function loop(){
   const candidate = raw === 'NONE' ? 'MID' : raw;   // silence defaults to walk
   if (candidate !== committed){
     if (pending !== candidate){ pending = candidate; pendingSince = now; }
-    else if (now - pendingSince >= HYST_MS){
+    else if (now - pendingSince >= (candidate === 'MID' ? RELEASE_MS : HYST_MS)){
       const was = committed;
       committed = candidate;
       pending = null;
@@ -347,8 +349,8 @@ function loop(){
 
   // GATE 2 — sustain stability
   if (sustain){
-    // seed from the committed band, not the first (least settled) voiced frame
-    if (!sustain.target && voiced && raw === committed) sustain.target = committed;
+    // seed from a committed LOW/HIGH pose, not the first (least settled) voiced frame; MID is silence and tests nothing
+    if (!sustain.target && voiced && raw === committed && committed !== 'MID') sustain.target = committed;
     sustain.total++;
     if (voiced && raw === sustain.target) sustain.hits++; else sustain.wrong++;
   }
