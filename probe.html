@@ -124,6 +124,7 @@ const MIN_HZ     = 70, MAX_HZ = 1100;
 const FFT_SIZE   = 2048;   // analyser window; 2048 = 43 ms @ 48 kHz. Halve it (and raise MIN_HZ to ~100) if gate 1 fails
 const VIEW_LO    = 70, VIEW_HI = 1100; // needle scale range (log)
 const SUSTAIN_MIN_FRAMES = 60; // at least 20 fps over the 3s test, like the silence gate
+const SUSTAIN_HOLD_MS = 2000;  // gate 2: the HIGH/LOW pose must be held this long of the 3s window
 const GATE1_MS   = 170;    // readout limit: ~200 ms real minus window fill + mic
 
 let ac, analyser, buf, running = false;
@@ -239,7 +240,7 @@ let sustainTimer, silenceTimer;
 $('btnSustain').onclick = () => {
   if (mid === null){ log('calibrate first.'); return; }
   $('btnSustain').disabled = true;
-  sustain = {hits:0, total:0, target:null, wrong:0, commits:0};
+  sustain = {hits:0, total:0, target:null, seedAt:0, wrong:0, commits:0};
   log('sustain test — hold a HIGH or LOW note for 3s…');
   sustainTimer = setTimeout(() => {
     const t = sustain; sustain = null;
@@ -248,9 +249,10 @@ $('btnSustain').onclick = () => {
     if (t.total < SUSTAIN_MIN_FRAMES){ setGate('g2', false, t.total + ' frames — screen slept?'); log('SUSTAIN: too few frames; keep the screen on and retry.'); return; }
     if (!t.target){ setGate('g2', false, 'no high/low pose'); log('SUSTAIN: never reached HIGH or LOW; hold a high or low note.'); return; }
     const pct = 100 * t.hits / t.total;           // reported only: the player sees the pose, not raw frames
-    const ok = t.commits === 0;                   // flicker = a committed band change
-    setGate('g2', ok, t.target + ' · ' + pct.toFixed(1) + '% · ' + t.commits + ' commit');
-    log('SUSTAIN: held ' + t.target + ', ' + pct.toFixed(1) + '% raw frames in band, ' + t.wrong + ' off-band frames, ' + t.commits + ' pose change(s).');
+    const held = performance.now() - t.seedAt;
+    const ok = t.commits === 0 && held >= SUSTAIN_HOLD_MS;   // flicker = a committed band change
+    setGate('g2', ok, t.target + ' · ' + (held/1000).toFixed(1) + 's · ' + pct.toFixed(1) + '% · ' + t.commits + ' commit');
+    log('SUSTAIN: held ' + t.target + ' ' + Math.round(held) + ' ms, ' + pct.toFixed(1) + '% raw frames in band, ' + t.wrong + ' off-band frames, ' + t.commits + ' pose change(s).');
   }, 3000);
 };
 
@@ -350,7 +352,7 @@ function loop(){
   // GATE 2 — sustain stability
   if (sustain){
     // seed from a committed LOW/HIGH pose, not the first (least settled) voiced frame; MID is silence and tests nothing
-    if (!sustain.target && voiced && raw === committed && committed !== 'MID') sustain.target = committed;
+    if (!sustain.target && voiced && raw === committed && committed !== 'MID'){ sustain.target = committed; sustain.seedAt = now; }
     sustain.total++;
     if (voiced && raw === sustain.target) sustain.hits++; else sustain.wrong++;
   }
