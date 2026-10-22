@@ -96,7 +96,7 @@
   <table>
     <tr><td>1 · Onset readout &le; 170 ms (info, excludes mic delay)</td><td id="g1" class="wait">—</td></tr>
     <tr><td>2 · Hold high or low 3s: pose never changes (info)</td><td id="g2" class="wait">—</td></tr>
-    <tr><td>3 · Silence: 0 band changes / voiced frames</td><td id="g3" class="wait">—</td></tr>
+    <tr><td>3 · Silence: 0 band changes (voiced frames: tuning info)</td><td id="g3" class="wait">—</td></tr>
     <tr><td>4 · Range coverage (per voice)</td><td id="g4" class="wait">—</td></tr>
   </table>
 </div>
@@ -145,7 +145,8 @@ function detect(b, sr){
   rms = Math.sqrt(rms/N);
   if (rms < RMS_GATE) return {hz:0, conf:0, rms};
 
-  const minLag = Math.floor(sr/MAX_HZ), maxLag = Math.min(Math.floor(sr/MIN_HZ), N-1);
+  // Include the left neighbour so a peak at MAX_HZ is not mistaken for the zero-lag shoulder.
+  const minLag = Math.max(1, Math.floor(sr/MAX_HZ)-1), maxLag = Math.min(Math.floor(sr/MIN_HZ), N-1);
   let c0 = 0;
   for (let i=0;i<N;i++) c0 += b[i]*b[i];
 
@@ -186,9 +187,12 @@ function bandOf(hz, conf){
 
 // ---------- mic ----------
 $('btnStart').onclick = async () => {
+  if ($('btnStart').disabled) return;
+  $('btnStart').disabled = true;
+  let stream;
   try {
     ac = new (window.AudioContext||window.webkitAudioContext)();   // before any await: iOS needs the tap
-    const stream = await navigator.mediaDevices.getUserMedia({audio:{
+    stream = await navigator.mediaDevices.getUserMedia({audio:{
       echoCancellation:false, noiseSuppression:false, autoGainControl:false
     }});
     await ac.resume();
@@ -199,10 +203,13 @@ $('btnStart').onclick = async () => {
     running = true;
     navigator.wakeLock?.request('screen').catch(()=>{});   // iOS auto-lock can end the 30s silence test
     ['btnCal','btnSustain','btnSilence','btnReset'].forEach(i=>$(i).disabled=false);
-    $('btnStart').disabled = true;
     log('mic open @ ' + ac.sampleRate + ' Hz. AEC/NS/AGC off. window ' + Math.round(1000*FFT_SIZE/ac.sampleRate) + ' ms (not included in the latency readout).');
     loop();
   } catch (e) {
+    running = false;
+    stream?.getTracks().forEach(track=>track.stop());
+    await ac?.close().catch(()=>{});
+    $('btnStart').disabled = false;
     log('MIC FAILED: ' + e.name + ' — needs https and a user tap.\nไมค์ใช้ไม่ได้ ถ้าเปิดจาก LINE/Messenger ให้เปิดลิงก์นี้ใน Safari หรือ Chrome');
   }
 };
@@ -217,7 +224,6 @@ $('btnCal').onclick = () => {
   $('btnCal').disabled = true;
   calSamples = [];
   log('calibrating — sing ช้าง~ ช้าง~ ช้าง~ now (2s)…');
-  setTimeout(finishCal, 2000);
 };
 function finishCal(){
   const v = calSamples.filter(x=>x>0);
@@ -269,7 +275,7 @@ $('btnSilence').onclick = () => {
     $('btnSilence').disabled = false;
     if (!s) return;                               // reset mid-test
     if (s.frames < 600){ setGate('g3', false, s.frames + ' frames — screen slept?'); log('SILENCE: only ' + s.frames + ' frames ran; keep the screen on and retry.'); return; }
-    setGate('g3', s.changes === 0 && s.voiced === 0, s.changes + ' change(s) · ' + s.voiced + ' voiced frame(s)');
+    setGate('g3', s.changes === 0, s.changes + ' change(s) · ' + s.voiced + ' voiced frame(s)' + (s.voiced ? ' · tuning note: RMS_GATE' : ''));
     log('SILENCE: ' + s.changes + ' spurious band change(s), ' + s.voiced + ' accepted voiced frame(s).');
   }, 30000);
 };
@@ -321,7 +327,10 @@ function loop(){
   const now = performance.now();
   if (now - fpsAt > 500){ $('fps').textContent = Math.round(frames*1000/(now-fpsAt)) + ' fps'; frames=0; fpsAt=now; }
 
-  if (calSamples && voiced) calSamples.push(hz);
+  if (calSamples && voiced){
+    if (calSamples.length === 0) setTimeout(finishCal, 2000);
+    calSamples.push(hz);
+  }
   if (silence){ silence.frames++; if (voiced) silence.voiced++; }
 
   // GATE 1 — onset latency: silence -> first committed band
